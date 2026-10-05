@@ -5,7 +5,8 @@ Name: Muhammad Zain ul Abidin | Roll No: 075
 import os
 import random
 from collections import deque
-
+import matplotlib
+matplotlib.use("Agg")  # save plots to files, don't open windows
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Patch
