@@ -16,10 +16,17 @@ GRID_SIZE = 25       # grid is GRID_SIZE x GRID_SIZE
 OBSTACLE_DENSITY = 0.25
 MIN_START_GOAL_DIST = 0.6 * GRID_SIZE   # keep the problem non-trivial
 
-# ---------------- PSO / path configuration ----------------
+# ---------------- Path / fitness configuration ----------------
 NUM_WAYPOINTS = 8          # intermediate waypoints per particle
 COLLISION_PENALTY = 100.0  # cost added per sample point inside an obstacle
 SAMPLE_STEP = 0.25         # spacing of collision-check samples along a segment
+
+# ---------------- PSO configuration ----------------
+SWARM_SIZE = 100
+MAX_ITERATIONS = 400
+W_START, W_END = 0.9, 0.4  # inertia weight decays linearly
+C1, C2 = 1.5, 1.5          # cognitive and social coefficients
+STAGNATION_LIMIT = 100     # stop if global best does not improve this long
 
 
 def bfs_reachable(grid, start, goal):
@@ -114,11 +121,10 @@ def count_collisions(path, grid):
         x1, y1 = path[i + 1]
         seg_len = np.hypot(x1 - x0, y1 - y0)
         steps = max(2, int(np.ceil(seg_len / SAMPLE_STEP)) + 1)
-        for t in np.linspace(0.0, 1.0, steps):
-            ix = int(np.clip(round(x0 + t * (x1 - x0)), 0, n - 1))
-            iy = int(np.clip(round(y0 + t * (y1 - y0)), 0, n - 1))
-            if grid[iy, ix] == 1:
-                collisions += 1
+        t = np.linspace(0.0, 1.0, steps)
+        ix = np.clip(np.rint(x0 + t * (x1 - x0)).astype(int), 0, n - 1)
+        iy = np.clip(np.rint(y0 + t * (y1 - y0)).astype(int), 0, n - 1)
+        collisions += int(grid[iy, ix].sum())
     return collisions
 
 
@@ -130,6 +136,65 @@ def fitness(position, grid, start, goal):
     return length + COLLISION_PENALTY * collisions, length, collisions
 
 
+def run_pso(grid, start, goal, rng):
+    """Particle Swarm Optimisation over waypoint positions.
+    Returns (best_position, best_cost, history_of_best_cost)."""
+    n = grid.shape[0]
+    dim = 2 * NUM_WAYPOINTS
+    v_max = 0.2 * (n - 1)
+
+    # Initialise: half the swarm near the straight line, half uniformly random
+    t = np.linspace(0, 1, NUM_WAYPOINTS + 2)[1:-1]
+    line = np.column_stack((start[0] + t * (goal[0] - start[0]),
+                            start[1] + t * (goal[1] - start[1]))).ravel()
+    half = SWARM_SIZE // 2
+    pos = np.empty((SWARM_SIZE, dim))
+    pos[:half] = line + rng.normal(0, 3.0, (half, dim))
+    pos[half:] = rng.uniform(0, n - 1, (SWARM_SIZE - half, dim))
+    pos = np.clip(pos, 0, n - 1)
+    vel = rng.uniform(-v_max, v_max, (SWARM_SIZE, dim))
+
+    # Personal and global bests
+    pbest = pos.copy()
+    pbest_cost = np.array([fitness(p, grid, start, goal)[0] for p in pos])
+    g = int(np.argmin(pbest_cost))
+    gbest = pbest[g].copy()
+    gbest_cost = float(pbest_cost[g])
+    history = [gbest_cost]
+    stagnant = 0
+
+    for it in range(MAX_ITERATIONS):
+        w = W_START - (W_START - W_END) * it / (MAX_ITERATIONS - 1)
+        r1 = rng.random((SWARM_SIZE, dim))
+        r2 = rng.random((SWARM_SIZE, dim))
+
+        # Velocity and position update
+        vel = w * vel + C1 * r1 * (pbest - pos) + C2 * r2 * (gbest - pos)
+        vel = np.clip(vel, -v_max, v_max)
+        pos = np.clip(pos + vel, 0, n - 1)
+
+        # Evaluate (length + collision penalty) and update bests
+        improved = False
+        for i in range(SWARM_SIZE):
+            cost = fitness(pos[i], grid, start, goal)[0]
+            if cost < pbest_cost[i]:
+                pbest_cost[i] = cost
+                pbest[i] = pos[i]
+                if cost < gbest_cost - 1e-9:
+                    gbest_cost = float(cost)
+                    gbest = pos[i].copy()
+                    improved = True
+
+        history.append(gbest_cost)
+        stagnant = 0 if improved else stagnant + 1
+        if stagnant >= STAGNATION_LIMIT:
+            print(f"Stopped early at iteration {it + 1}: no improvement for "
+                  f"{STAGNATION_LIMIT} iterations")
+            break
+
+    return gbest, gbest_cost, history
+
+
 if __name__ == "__main__":
     grid, start, goal, attempts = generate_problem()
     print(f"Seed: {SEED}")
@@ -137,12 +202,25 @@ if __name__ == "__main__":
     print(f"Start: {start}, Goal: {goal}")
     print(f"Instance accepted after {attempts} attempt(s)")
 
-    # Test: evenly spaced waypoints on the straight line start -> goal
-    t = np.linspace(0, 1, NUM_WAYPOINTS + 2)[1:-1]
-    straight = np.column_stack((start[0] + t * (goal[0] - start[0]),
-                                start[1] + t * (goal[1] - start[1]))).ravel()
-    cost, length, collisions = fitness(straight, grid, start, goal)
-    print(f"Straight-line test -> cost: {cost:.2f}, length: {length:.2f}, "
-          f"collisions: {collisions}")
-    plot_grid(grid, start, goal, path=particle_to_path(straight, start, goal),
-              title="Straight-line test path (not optimised)")
+    rng = np.random.default_rng(SEED)
+    best, best_cost, history = run_pso(grid, start, goal, rng)
+    cost, length, collisions = fitness(best, grid, start, goal)
+    path = particle_to_path(best, start, goal)
+
+    print(f"Best cost: {cost:.2f}")
+    print(f"Path length: {length:.2f}")
+    print(f"Collisions: {collisions}")
+    print("Obstacle-free path found: " + ("YES" if collisions == 0 else "NO"))
+
+    plot_grid(grid, start, goal, path=path,
+              title=f"PSO best path (length {length:.2f}, collisions {collisions})",
+              save_as="results/final_path.png")
+
+    plt.figure(figsize=(7, 4))
+    plt.plot(history)
+    plt.xlabel("Iteration")
+    plt.ylabel("Best cost")
+    plt.title("PSO convergence")
+    plt.grid(True)
+    plt.savefig("results/convergence.png", dpi=150, bbox_inches="tight")
+    plt.show()
