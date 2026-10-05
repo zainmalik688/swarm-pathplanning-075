@@ -3,11 +3,12 @@ Swarm-Based Path Planning with Obstacles (PSO)
 Name: Muhammad Zain ul Abidin | Roll No: 075
 """
 import os
-import matplotlib.pyplot as plt
 import random
 from collections import deque
 
+import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Patch
 
 # ---------------- Problem configuration ----------------
 SEED = 75            # roll number 075
@@ -56,6 +57,8 @@ def generate_problem(seed=SEED, n=GRID_SIZE, density=OBSTACLE_DENSITY):
             continue
         if bfs_reachable(grid, start, goal):
             return grid, start, goal, attempts
+
+
 def plot_grid(grid, start, goal, path=None, title="Generated problem (seed 75)",
               save_as=None):
     """Draw obstacles, start, goal and (optionally) a path. Points are (x, y)."""
@@ -74,11 +77,14 @@ def plot_grid(grid, start, goal, path=None, title="Generated problem (seed 75)",
     ax.scatter(*goal, c="red", s=150, marker="*", label="Goal", zorder=3)
 
     ax.set_title(title)
-    ax.legend(loc="upper right")
+    handles, labels = ax.get_legend_handles_labels()
+    handles.append(Patch(facecolor="dimgray", label="Obstacle"))
+    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.02, 1))
     if save_as:
         os.makedirs(os.path.dirname(save_as), exist_ok=True)
         fig.savefig(save_as, dpi=150, bbox_inches="tight")
     plt.show()
+
 
 if __name__ == "__main__":
     grid, start, goal, attempts = generate_problem()
