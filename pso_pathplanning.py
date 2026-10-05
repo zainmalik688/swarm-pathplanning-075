@@ -16,6 +16,11 @@ GRID_SIZE = 25       # grid is GRID_SIZE x GRID_SIZE
 OBSTACLE_DENSITY = 0.25
 MIN_START_GOAL_DIST = 0.6 * GRID_SIZE   # keep the problem non-trivial
 
+# ---------------- PSO / path configuration ----------------
+NUM_WAYPOINTS = 8          # intermediate waypoints per particle
+COLLISION_PENALTY = 100.0  # cost added per sample point inside an obstacle
+SAMPLE_STEP = 0.25         # spacing of collision-check samples along a segment
+
 
 def bfs_reachable(grid, start, goal):
     """Check that goal can be reached from start (4-connected moves).
@@ -86,10 +91,58 @@ def plot_grid(grid, start, goal, path=None, title="Generated problem (seed 75)",
     plt.show()
 
 
+def particle_to_path(position, start, goal):
+    """A particle is a flat array [x1, y1, x2, y2, ...] of waypoints.
+    The full path is start -> waypoints -> goal."""
+    waypoints = position.reshape(-1, 2)
+    return [tuple(start)] + [tuple(w) for w in waypoints] + [tuple(goal)]
+
+
+def path_length(path):
+    """Total Euclidean length of the polyline."""
+    return sum(np.hypot(path[i + 1][0] - path[i][0], path[i + 1][1] - path[i][1])
+               for i in range(len(path) - 1))
+
+
+def count_collisions(path, grid):
+    """Sample points along every segment and count how many fall inside a
+    blocked cell. Cell (ix, iy) is centred on integer coordinates."""
+    n = grid.shape[0]
+    collisions = 0
+    for i in range(len(path) - 1):
+        x0, y0 = path[i]
+        x1, y1 = path[i + 1]
+        seg_len = np.hypot(x1 - x0, y1 - y0)
+        steps = max(2, int(np.ceil(seg_len / SAMPLE_STEP)) + 1)
+        for t in np.linspace(0.0, 1.0, steps):
+            ix = int(np.clip(round(x0 + t * (x1 - x0)), 0, n - 1))
+            iy = int(np.clip(round(y0 + t * (y1 - y0)), 0, n - 1))
+            if grid[iy, ix] == 1:
+                collisions += 1
+    return collisions
+
+
+def fitness(position, grid, start, goal):
+    """Lower is better: path length + penalty for each colliding sample."""
+    path = particle_to_path(position, start, goal)
+    length = path_length(path)
+    collisions = count_collisions(path, grid)
+    return length + COLLISION_PENALTY * collisions, length, collisions
+
+
 if __name__ == "__main__":
     grid, start, goal, attempts = generate_problem()
     print(f"Seed: {SEED}")
     print(f"Grid: {GRID_SIZE}x{GRID_SIZE}, obstacles: {int(grid.sum())}")
     print(f"Start: {start}, Goal: {goal}")
     print(f"Instance accepted after {attempts} attempt(s)")
-    plot_grid(grid, start, goal, save_as="results/instance.png")
+
+    # Test: evenly spaced waypoints on the straight line start -> goal
+    t = np.linspace(0, 1, NUM_WAYPOINTS + 2)[1:-1]
+    straight = np.column_stack((start[0] + t * (goal[0] - start[0]),
+                                start[1] + t * (goal[1] - start[1]))).ravel()
+    cost, length, collisions = fitness(straight, grid, start, goal)
+    print(f"Straight-line test -> cost: {cost:.2f}, length: {length:.2f}, "
+          f"collisions: {collisions}")
+    plot_grid(grid, start, goal, path=particle_to_path(straight, start, goal),
+              title="Straight-line test path (not optimised)")
