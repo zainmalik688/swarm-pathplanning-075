@@ -2,7 +2,8 @@
 Swarm-Based Path Planning with Obstacles (PSO)
 Name: Muhammad Zain ul Abidin | Roll No: 075
 """
-
+import os
+import matplotlib.pyplot as plt
 import random
 from collections import deque
 
@@ -55,7 +56,29 @@ def generate_problem(seed=SEED, n=GRID_SIZE, density=OBSTACLE_DENSITY):
             continue
         if bfs_reachable(grid, start, goal):
             return grid, start, goal, attempts
+def plot_grid(grid, start, goal, path=None, title="Generated problem (seed 75)",
+              save_as=None):
+    """Draw obstacles, start, goal and (optionally) a path. Points are (x, y)."""
+    n = grid.shape[0]
+    fig, ax = plt.subplots(figsize=(7, 7))
+    ax.imshow(grid, cmap="Greys", origin="lower", vmin=0, vmax=1.5)
+    ax.set_xticks(np.arange(-0.5, n, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, n, 1), minor=True)
+    ax.grid(which="minor", color="lightgray", linewidth=0.5)
+    ax.tick_params(which="minor", length=0)
 
+    if path is not None:
+        xs, ys = zip(*path)
+        ax.plot(xs, ys, "-o", color="tab:blue", markersize=4, linewidth=2, label="Path")
+    ax.scatter(*start, c="green", s=120, marker="s", label="Start", zorder=3)
+    ax.scatter(*goal, c="red", s=150, marker="*", label="Goal", zorder=3)
+
+    ax.set_title(title)
+    ax.legend(loc="upper right")
+    if save_as:
+        os.makedirs(os.path.dirname(save_as), exist_ok=True)
+        fig.savefig(save_as, dpi=150, bbox_inches="tight")
+    plt.show()
 
 if __name__ == "__main__":
     grid, start, goal, attempts = generate_problem()
@@ -63,3 +86,4 @@ if __name__ == "__main__":
     print(f"Grid: {GRID_SIZE}x{GRID_SIZE}, obstacles: {int(grid.sum())}")
     print(f"Start: {start}, Goal: {goal}")
     print(f"Instance accepted after {attempts} attempt(s)")
+    plot_grid(grid, start, goal, save_as="results/instance.png")
